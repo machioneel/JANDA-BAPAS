@@ -24,31 +24,63 @@ import {
   validateClassification,
 } from './scoringEngine';
 
-// Definisikan tipe struktur JSON yang diharapkan dari AI
+// ============================================================================
+// FUNGSI PEMBERSIH & TIPE DATA
+// ============================================================================
+
 interface AIResponse {
   letter_number: string | null;
-  letter_date: string | null; // format YYYY-MM-DD atau teks
+  letter_date: string | null;
   sender: string | null;
   receiver: string | null;
   subject: string | null;
   classification: string | null;
 }
 
+// Mencegah error React pada input form kalender jika tanggalnya "00"
+function formatSafeDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '';
+  let safeDate = dateStr.replace(/-00/g, '-01');
+  const isValidFormat = /^\d{4}-\d{2}-\d{2}$/.test(safeDate);
+  return isValidFormat ? safeDate : ''; 
+}
+
 // ============================================================================
-// BAGIAN 1: SISTEM AI FALLBACK
+// BAGIAN 1: SISTEM AI FALLBACK CERDAS (STATEFUL)
 // ============================================================================
 
-const SYSTEM_PROMPT = `Anda adalah asisten AI yang ahli dalam mengekstrak metadata dari dokumen teks bahasa Indonesia. 
-Tugas Anda adalah membaca teks acak dari dokumen PDF/Word dan mencari informasi berikut:
-1. Nomor Surat (letter_number)
-2. Tanggal Surat (letter_date)
-3. Pengirim (sender) - Instansi atau nama pengirim
-4. Penerima (receiver)
-5. Perihal / Judul (subject)
-6. Klasifikasi (classification) - Rahasia, Biasa, Penting, dll.
+// Mengingat provider mana yang tidak sedang limit.
+// 1 = Groq, 2 = Gemini, 3 = OpenRouter, 4 = Puter
+let activeAIProvider = 1; 
+
+const SYSTEM_PROMPT = `Anda adalah asisten AI yang ahli dalam mengekstrak metadata dan mengklasifikasikan dokumen administrasi Indonesia. 
+Tugas Anda adalah membaca teks dari dokumen PDF/Word dan mencari informasi berikut:
+
+1. Nomor Surat (letter_number) - Cari nomor surat utama. Jika ada nomor referensi/rujukan, pastikan hanya mengambil nomor surat yang dikeluarkan.
+2. Tanggal Surat (letter_date) - Format: YYYY-MM-DD.
+3. Pengirim (sender) - Ekstrak nama unit kerja/instansi tingkat terbawah (Contoh: "BALAI PEMASYARAKATAN KELAS I JAKARTA SELATAN").
+4. Penerima (receiver) - Jika individu, ambil nama lengkap. Jika instansi, ambil unit terkecilnya.
+5. Perihal / Judul (subject) - Ringkasan singkat isi surat.
+6. Klasifikasi (classification) - (Rahasia, Biasa, Penting, Segera, dll).
+
+7. Jenis Surat (document_type) - KLASIFIKASIKAN ke dalam salah satu opsi berikut berdasarkan konteks teks:
+   - "incoming": Jika surat berasal dari instansi luar yang ditujukan ke BAPAS.
+   - "outgoing": Jika surat diterbitkan oleh BAPAS untuk pihak luar.
+   - "nota_dinas": Jika surat bersifat internal antar bagian/pejabat di dalam instansi.
+   - "laporan_litmas": Jika dokumen berisi Penelitian Kemasyarakatan atau pendampingan klien.
+   - "surat_keputusan": Jika teks mengandung kata "Menimbang", "Mengingat", "Memutuskan".
+
+8. Kategori (category) - Tentukan Unit Kerja/Kategori yang paling relevan:
+   - "Umum": Administrasi harian, surat tugas umum, persuratan rutin.
+   - "Kepegawaian": Mutasi, cuti, kenaikan pangkat, data pegawai.
+   - "Keuangan": DIPA, tagihan, anggaran, kuitansi, gaji.
+   - "Sarana Prasarana": Pengadaan barang, pemeliharaan gedung, inventaris.
+   - "Teknologi Informasi": Jaringan, aplikasi, pemeliharaan server/PC.
+   - "Hubungan Masyarakat": Publikasi, berita acara kegiatan, dokumentasi.
 
 KEMBALIKAN HANYA DALAM FORMAT JSON MURNI TANPA MARKDOWN ATAU TEKS LAIN.
 Jika informasi tidak ditemukan, isi dengan null.
+
 Format JSON yang diwajibkan:
 {
   "letter_number": "...",
@@ -56,12 +88,13 @@ Format JSON yang diwajibkan:
   "sender": "...",
   "receiver": "...",
   "subject": "...",
-  "classification": "..."
-}`;
+  "classification": "...",
+  "document_type": "...",
+  "category": "..."
+}
 
-/**
- * 1. Panggilan ke API Groq
- */
+Analisis teks secara mendalam untuk menentukan document_type dan category berdasarkan kata kunci dan tata bahasa formal yang digunakan.`;
+
 async function fetchFromGroq(text: string): Promise<string> {
   const apiKey = import.meta.env.VITE_GROQ_API_KEY?.trim();
   if (!apiKey) throw new Error('API Key Groq tidak ditemukan');
@@ -73,7 +106,7 @@ async function fetchFromGroq(text: string): Promise<string> {
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'llama-3.1-8b-instant', // Model diperbarui
+      model: 'llama-3.1-8b-instant',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: `Teks dokumen:\n${text}` }
@@ -83,16 +116,13 @@ async function fetchFromGroq(text: string): Promise<string> {
     }),
   });
 
-  if (!response.ok) throw new Error(`Groq Error: ${response.status} ${response.statusText}`);
+  if (!response.ok) throw new Error(`Groq Error: ${response.status}`);
   const data = await response.json();
   return data.choices[0].message.content;
 }
 
-/**
- * 2. Panggilan ke API Gemini Google
- */
 async function fetchFromGemini(text: string): Promise<string> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY?.trim(); // .trim() mencegah error 404 karena spasi
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY?.trim();
   if (!apiKey) throw new Error('API Key Gemini tidak ditemukan');
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
@@ -109,14 +139,11 @@ async function fetchFromGemini(text: string): Promise<string> {
     }),
   });
 
-  if (!response.ok) throw new Error(`Gemini Error: ${response.status} ${response.statusText}`);
+  if (!response.ok) throw new Error(`Gemini Error: ${response.status}`);
   const data = await response.json();
   return data.candidates[0].content.parts[0].text;
 }
 
-/**
- * 3. Panggilan ke API OpenRouter
- */
 async function fetchFromOpenRouter(text: string): Promise<string> {
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY?.trim();
   if (!apiKey) throw new Error('API Key OpenRouter tidak ditemukan');
@@ -128,7 +155,7 @@ async function fetchFromOpenRouter(text: string): Promise<string> {
       'Authorization': `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'google/gemma-2-9b-it:free', // Model diperbarui ke versi yang tersedia
+      model: 'meta-llama/llama-3-8b-instruct:free',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: `Teks dokumen:\n${text}` }
@@ -137,79 +164,62 @@ async function fetchFromOpenRouter(text: string): Promise<string> {
     }),
   });
 
-  if (!response.ok) throw new Error(`OpenRouter Error: ${response.status} ${response.statusText}`);
+  if (!response.ok) throw new Error(`OpenRouter Error: ${response.status}`);
   const data = await response.json();
   return data.choices[0].message.content;
 }
 
-/**
- * 4. Panggilan ke Puter.js (Jika Anda menggunakan script dari Puter.js)
- */
 async function fetchFromPuter(text: string): Promise<string> {
-  // @ts-ignore - Karena puter di-load via CDN di index.html
-  if (typeof puter === 'undefined' || !puter.ai) {
-    throw new Error('Puter.js SDK tidak tersedia');
-  }
-
   // @ts-ignore
-  const response = await puter.ai.chat(
-    `${SYSTEM_PROMPT}\n\nTeks dokumen:\n${text}`, 
-    { model: 'claude-3-haiku' } // Puter kadang menyediakan akses ini
-  );
-  
-  // Terkadang LLM mengembalikan teks beserta markdown ```json, kita harus membersihkannya
+  if (typeof puter === 'undefined' || !puter.ai) throw new Error('Puter SDK tidak tersedia');
+  // @ts-ignore
+  const response = await puter.ai.chat(`${SYSTEM_PROMPT}\n\nTeks dokumen:\n${text}`, { model: 'claude-3-haiku' });
   return response?.message?.content || response;
 }
 
-/**
- * Fungsi Manajer Utama AI (Load Balancer & Fallback)
- */
 async function extractWithAIFallback(text: string): Promise<AIResponse> {
-  // Potong teks agar tidak melebihi batas token (ambil 4000 karakter pertama)
   const safeText = text.substring(0, 4000); 
-  
   let rawJsonResponse = "";
 
-  // Percobaan berjenjang
-  try {
-    console.log("Mencoba ekstraksi dengan Groq...");
-    rawJsonResponse = await fetchFromGroq(safeText);
-  } catch (errGroq) {
-    console.warn("Groq gagal, beralih ke Gemini:", errGroq);
-    
+  while (activeAIProvider <= 4) {
     try {
-      console.log("Mencoba ekstraksi dengan Gemini...");
-      rawJsonResponse = await fetchFromGemini(safeText);
-    } catch (errGemini) {
-      console.warn("Gemini gagal, beralih ke OpenRouter:", errGemini);
-      
-      try {
+      if (activeAIProvider === 1) {
+        console.log("Mencoba ekstraksi dengan Groq...");
+        rawJsonResponse = await fetchFromGroq(safeText);
+        break;
+      } 
+      else if (activeAIProvider === 2) {
+        console.log("Mencoba ekstraksi dengan Gemini...");
+        rawJsonResponse = await fetchFromGemini(safeText);
+        break;
+      } 
+      else if (activeAIProvider === 3) {
         console.log("Mencoba ekstraksi dengan OpenRouter...");
         rawJsonResponse = await fetchFromOpenRouter(safeText);
-      } catch (errOpenRouter) {
-        console.warn("OpenRouter gagal, beralih ke Puter.js:", errOpenRouter);
-        
-        try {
-          console.log("Mencoba ekstraksi dengan Puter.js...");
-          rawJsonResponse = await fetchFromPuter(safeText);
-        } catch (errPuter) {
-          console.error("Semua AI gagal, akan menggunakan Regex fallback.");
-          throw new Error("ALL_AI_FAILED");
-        }
+        break;
+      } 
+      else if (activeAIProvider === 4) {
+        console.log("Mencoba ekstraksi dengan Puter.js...");
+        rawJsonResponse = await fetchFromPuter(safeText);
+        break;
       }
+    } catch (error: any) {
+      console.warn(`Provider AI ${activeAIProvider} gagal (${error.message}). Beralih permanen ke AI selanjutnya...`);
+      activeAIProvider++; 
     }
   }
 
-  // Membersihkan JSON jika ada markdown tambahan dari AI (seperti ```json ... ```)
+  if (activeAIProvider > 4 || !rawJsonResponse) {
+    throw new Error("ALL_AI_FAILED");
+  }
+
   const cleanJsonText = rawJsonResponse.replace(/```json/gi, '').replace(/```/g, '').trim();
   return JSON.parse(cleanJsonText) as AIResponse;
 }
 
-
 // ============================================================================
-// BAGIAN 2: LOGIK LAMA ANDA (SEBAGAI FALLBACK/PENYELAMAT)
+// BAGIAN 2: LOGIK LAMA ANDA (SEBAGAI FALLBACK/PENYELAMAT REGEX)
 // ============================================================================
-// (Fungsi-fungsi di bawah ini tetap dibiarkan seperti asli dari kode Anda)
 
 function extractCandidatesFromSection(
   text: string, section: Section, patterns: RegExp[], formatValidator: (v: string) => number
@@ -247,7 +257,18 @@ function extractFieldWithScoring(
 function extractKopSurat(header: string): string | null {
   for (const pattern of KOP_PATTERNS) {
     const match = header.match(pattern);
-    if (match) return match[0].trim();
+    if (match) {
+      const fullKop = match[0].trim();
+      const specificUnitMatch = fullKop.match(/(?:BALAI|KANTOR|DINAS|LEMBAGA|RUMAH SAKIT|BADAN|UPT)[A-Z0-9\sI\-]+$/i);
+      if (specificUnitMatch) {
+        return specificUnitMatch[0].replace(/\s+/g, ' ').trim();
+      }
+      const lines = fullKop.split('\n').map(l => l.trim()).filter(l => l.length > 5);
+      if (lines.length > 1) {
+        return lines[lines.length - 1];
+      }
+      return fullKop;
+    }
   }
   return null;
 }
@@ -270,29 +291,18 @@ function extractFooterSigner(footer: string): { name: string; nip: string } | nu
 }
 
 // ============================================================================
-// BAGIAN 3: FUNGSI EKSTRAKSI UTAMA YANG DIEKSPOR
+// BAGIAN 3: FUNGSI UTAMA
 // ============================================================================
 
-/**
- * Fungsi utama untuk mengekstrak metadata.
- * PERHATIAN: Fungsi ini sekarang asinkronus (Promise). Anda perlu
- * memperbarui komponen yang memanggilnya menjadi `await extractMetadata(...)`.
- */
 export async function extractMetadata(rawText: string): Promise<ExtractedMetadata> {
   const text = normalizeKeys(normalizeText(rawText));
   
   try {
-    // 1. Coba ekstraksi menggunakan AI
     const aiData = await extractWithAIFallback(text);
-    
-    // Konversi hasil AI ke tipe ExtractedMetadata dengan nilai confidence maksimum
-    // karena kita mempercayai output AI.
-    // Konversi hasil AI ke tipe ExtractedMetadata dengan nilai confidence maksimum
-    // karena kita mempercayai output AI.
     return {
       letter_number: { value: aiData.letter_number || '', confidence: 1.0 },
       letter_date: { 
-        value: aiData.letter_date ? (parseIndonesianDate(aiData.letter_date) || aiData.letter_date) : '', 
+        value: formatSafeDate(aiData.letter_date ? (parseIndonesianDate(aiData.letter_date) || aiData.letter_date) : ''), 
         confidence: 1.0 
       },
       sender: { value: aiData.sender || '', confidence: 1.0 },
@@ -302,10 +312,7 @@ export async function extractMetadata(rawText: string): Promise<ExtractedMetadat
     };
 
   } catch (error) {
-    // 2. Jika SELURUH AI gagal (misal tidak ada internet / limit terlampaui),
-    // kembali menggunakan logik Regex dan Scoring asli Anda yang solid!
     console.warn("Menggunakan Algoritma Regex bawaan karena AI gagal/limit.");
-    
     const sections = splitIntoSections(text);
     const letterNumber = extractFieldWithScoring(sections, LETTER_NUMBER_PATTERNS, validateLetterNumber, ['header']);
     let letterDate = extractFieldWithScoring(sections, LETTER_DATE_PATTERNS, validateDate, ['header', 'body']);
@@ -316,7 +323,7 @@ export async function extractMetadata(rawText: string): Promise<ExtractedMetadat
 
     if (letterDate.value) {
       const parsed = parseIndonesianDate(letterDate.value);
-      if (parsed) letterDate = { ...letterDate, value: parsed };
+      letterDate = { ...letterDate, value: formatSafeDate(parsed || letterDate.value) };
     }
 
     if (!sender.value || sender.confidence < 0.4) {

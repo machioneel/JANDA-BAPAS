@@ -8,13 +8,16 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Checkbox } from '@/components/ui/checkbox'; // Pastikan shadcn checkbox terpasang
 import { DocTypeSelect } from '@/components/DocTypeSelect';
-import { DOCUMENT_TYPE_LABELS } from '@/types/document';
-import { Search, ChevronLeft, ChevronRight, Eye, Filter, X, Download, Trash2 } from 'lucide-react';
+import { DocCategorySelect } from '@/components/DocCategorySelect'; // Tambahan Baru
+import { DOCUMENT_TYPE_LABELS, type DocumentCategory } from '@/types/document';
+import { Search, ChevronLeft, ChevronRight, Eye, Filter, X, Download, Trash2, CheckSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { useAuth } from '@/hooks/useAuth';
 import type { DocumentType } from '@/types/document';
+import { DocumentDetailModal } from '@/components/DocumentDetailModal';
 
 const currentYear = new Date().getFullYear();
 const yearOptions = Array.from({ length: 10 }, (_, i) => currentYear - i);
@@ -22,28 +25,53 @@ const yearOptions = Array.from({ length: 10 }, (_, i) => currentYear - i);
 export default function DocumentArchivePage() {
   const navigate = useNavigate();
   const { employee } = useAuth();
+  
+  // State Filters
   const [search, setSearch] = useState('');
   const [type, setType] = useState<DocumentType | ''>('');
+  const [category, setCategory] = useState<DocumentCategory | ''>(''); // Tambahan Baru
   const [year, setYear] = useState('');
   const [sender, setSender] = useState('');
   const [receiver, setReceiver] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  
+  // State UI
   const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]); // State Pilih Banyak
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null); 
+  const [deleteTarget, setDeleteTarget] = useState<{ id?: string; ids?: string[]; name: string } | null>(null);
+
   const deleteDoc = useDeleteDocument();
 
+  // Fetch Data (Menambahkan category ke query)
   const { data, isLoading } = useDocuments({
-    search, type, year, sender, receiver, dateFrom, dateTo, page, pageSize: 15,
+    search, type, category, year, sender, receiver, dateFrom, dateTo, page, pageSize: 15,
   });
+  
+  const documents = data?.documents || [];
   const totalPages = Math.ceil((data?.total ?? 0) / 15);
+  const activeFilterCount = [type, category, year, sender, receiver, dateFrom, dateTo].filter(Boolean).length;
 
-  const activeFilterCount = [type, year, sender, receiver, dateFrom, dateTo].filter(Boolean).length;
+  // Handler Pilih Banyak
+  const toggleSelectAll = () => {
+    if (selectedIds.length === documents.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(documents.map(doc => doc.id));
+    }
+  };
+
+  const toggleSelectRow = (id: string) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
 
   const clearFilters = () => {
-    setType(''); setYear(''); setSender(''); setReceiver(''); setDateFrom(''); setDateTo('');
+    setType(''); setCategory(''); setYear(''); setSender(''); setReceiver(''); setDateFrom(''); setDateTo('');
     setPage(1);
     toast.info('Semua filter telah dihapus');
   };
@@ -51,7 +79,14 @@ export default function DocumentArchivePage() {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      await deleteDoc.mutateAsync(deleteTarget.id);
+      if (deleteTarget.ids) {
+        // Hapus banyak
+        await Promise.all(deleteTarget.ids.map(id => deleteDoc.mutateAsync(id)));
+        setSelectedIds([]);
+      } else if (deleteTarget.id) {
+        // Hapus satu
+        await deleteDoc.mutateAsync(deleteTarget.id);
+      }
       toast.success('Dokumen berhasil dihapus');
     } catch {
       toast.error('Gagal menghapus dokumen');
@@ -65,12 +100,13 @@ export default function DocumentArchivePage() {
     try {
       let query = supabase
         .from('documents')
-        .select('letter_number, letter_date, sender, receiver, subject, classification, document_type, file_name, created_at')
+        .select('letter_number, letter_date, sender, receiver, subject, classification, document_type, file_name, created_at, category')
         .order('created_at', { ascending: false })
         .limit(5000);
 
       if (search) query = query.or(`letter_number.ilike.%${search}%,sender.ilike.%${search}%,receiver.ilike.%${search}%,subject.ilike.%${search}%`);
       if (type) query = query.eq('document_type', type);
+      if (category) query = query.eq('category', category);
       if (year) query = query.gte('letter_date', `${year}-01-01`).lte('letter_date', `${year}-12-31`);
       if (sender) query = query.ilike('sender', `%${sender}%`);
       if (receiver) query = query.ilike('receiver', `%${receiver}%`);
@@ -81,32 +117,30 @@ export default function DocumentArchivePage() {
       if (error) throw error;
       if (!docs || docs.length === 0) { toast.error('Tidak ada data untuk diekspor'); return; }
 
-      const headers = ['No. Surat', 'Tanggal', 'Pengirim', 'Penerima', 'Perihal', 'Klasifikasi', 'Jenis', 'Nama File', 'Tanggal Upload'];
+      const headers = ['No. Surat', 'Tanggal', 'Pengirim', 'Penerima', 'Perihal', 'Klasifikasi', 'Jenis', 'Kategori', 'Nama File'];
       const rows = docs.map(d => [
         d.letter_number, d.letter_date || '', d.sender, d.receiver, d.subject, d.classification,
         DOCUMENT_TYPE_LABELS[d.document_type as DocumentType] || d.document_type,
-        d.file_name, new Date(d.created_at).toLocaleDateString('id-ID'),
+        d.category || '-', d.file_name
       ]);
 
       const csvContent = [headers, ...rows]
         .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
         .join('\n');
 
-      const BOM = '\uFEFF';
-      const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = `arsip_dokumen_${new Date().toISOString().slice(0, 10)}.csv`;
       a.click();
-      URL.revokeObjectURL(url);
-      toast.success(`${docs.length} data berhasil diekspor ke CSV`);
+      toast.success('Export berhasil');
     } catch (err: any) {
-      toast.error('Gagal mengekspor data');
+      toast.error('Gagal ekspor');
     } finally {
       setExporting(false);
     }
-  }, [search, type, year, sender, receiver, dateFrom, dateTo]);
+  }, [search, type, category, year, sender, receiver, dateFrom, dateTo]);
 
   const getDocTypeLabel = (dt: string) => DOCUMENT_TYPE_LABELS[dt as DocumentType] || dt;
   const getDocTypeColor = (dt: string) => {
@@ -127,10 +161,21 @@ export default function DocumentArchivePage() {
           <h1 className="text-2xl font-bold text-foreground">Arsip Dokumen</h1>
           <p className="text-sm text-muted-foreground">Cari dan kelola arsip surat · {data?.total ?? 0} dokumen</p>
         </div>
-        <Button variant="outline" className="gap-2" disabled={exporting} onClick={handleExport}>
-          <Download className="w-4 h-4" />
-          {exporting ? 'Mengekspor...' : 'Export CSV'}
-        </Button>
+        <div className="flex gap-2">
+          {selectedIds.length > 0 && employee?.role === 'administrator' && (
+            <Button 
+                variant="destructive" 
+                className="gap-2 animate-in fade-in zoom-in duration-200"
+                onClick={() => setDeleteTarget({ ids: selectedIds, name: `${selectedIds.length} dokumen terpilih` })}
+            >
+                <Trash2 className="w-4 h-4" /> Hapus ({selectedIds.length})
+            </Button>
+          )}
+          <Button variant="outline" className="gap-2" disabled={exporting} onClick={handleExport}>
+            <Download className="w-4 h-4" />
+            {exporting ? 'Mengekspor...' : 'Export CSV'}
+          </Button>
+        </div>
       </div>
 
       <Card className="border-border">
@@ -143,12 +188,7 @@ export default function DocumentArchivePage() {
               </div>
               <Button variant={showFilters ? 'default' : 'outline'} onClick={() => setShowFilters(!showFilters)} className="gap-2">
                 <Filter className="w-4 h-4" />
-                Filter
-                {activeFilterCount > 0 && (
-                  <span className="ml-1 bg-primary-foreground text-primary text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
-                    {activeFilterCount}
-                  </span>
-                )}
+                Filter {activeFilterCount > 0 && `(${activeFilterCount})`}
               </Button>
             </div>
 
@@ -156,7 +196,11 @@ export default function DocumentArchivePage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-4 rounded-xl bg-muted/30 border border-border">
                 <div className="space-y-1">
                   <Label className="text-xs">Jenis Surat</Label>
-                  <DocTypeSelect value={type || 'all'} onValueChange={(v) => { setType(v === 'all' as any ? '' : v); setPage(1); }} includeAll />
+                  <DocTypeSelect value={type as DocumentType} onValueChange={(v) => { setType(v as DocumentType); setPage(1); }} />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Kategori / Unit</Label>
+                  <DocCategorySelect value={category} onValueChange={(v) => { setCategory(v as DocumentCategory); setPage(1); }} />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Tahun</Label>
@@ -180,17 +224,15 @@ export default function DocumentArchivePage() {
                   <Label className="text-xs">Dari Tanggal</Label>
                   <Input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1); }} />
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-1 lg:col-span-1">
                   <Label className="text-xs">Sampai Tanggal</Label>
                   <Input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(1); }} />
                 </div>
-                {activeFilterCount > 0 && (
-                  <div className="sm:col-span-2 lg:col-span-3 flex justify-end">
+                <div className="flex items-end lg:col-span-2 justify-end">
                     <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1 text-muted-foreground">
                       <X className="w-3 h-3" /> Hapus semua filter
                     </Button>
-                  </div>
-                )}
+                </div>
               </div>
             )}
           </div>
@@ -200,28 +242,47 @@ export default function DocumentArchivePage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50">
+                  <TableHead className="w-[50px]">
+                    <Checkbox 
+                        checked={documents.length > 0 && selectedIds.length === documents.length}
+                        onCheckedChange={toggleSelectAll}
+                    />
+                  </TableHead>
                   <TableHead className="font-semibold">No. Surat</TableHead>
                   <TableHead className="font-semibold">Tanggal</TableHead>
                   <TableHead className="font-semibold">Pengirim</TableHead>
-                  <TableHead className="font-semibold">Penerima</TableHead>
                   <TableHead className="font-semibold">Perihal</TableHead>
+                  <TableHead className="font-semibold text-center">Kategori</TableHead>
                   <TableHead className="font-semibold">Jenis</TableHead>
                   <TableHead className="font-semibold w-[100px]">Aksi</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Memuat data...</TableCell></TableRow>
-                ) : data?.documents.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Tidak ada dokumen ditemukan</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Memuat data...</TableCell></TableRow>
+                ) : documents.length === 0 ? (
+                  <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">Tidak ada dokumen ditemukan</TableCell></TableRow>
                 ) : (
-                  data?.documents.map((doc, i) => (
-                    <TableRow key={doc.id} className={`transition-colors hover:bg-muted/30 ${i % 2 === 0 ? '' : 'bg-muted/10'}`}>
+                  documents.map((doc, i) => (
+                    <TableRow 
+                        key={doc.id} 
+                        className={`transition-colors hover:bg-muted/30 ${i % 2 === 0 ? '' : 'bg-muted/10'} ${selectedIds.includes(doc.id) ? 'bg-primary/5' : ''}`}
+                    >
+                      <TableCell>
+                        <Checkbox 
+                            checked={selectedIds.includes(doc.id)}
+                            onCheckedChange={() => toggleSelectRow(doc.id)}
+                        />
+                      </TableCell>
                       <TableCell className="font-medium text-sm">{doc.letter_number || '-'}</TableCell>
                       <TableCell className="text-sm">{doc.letter_date || '-'}</TableCell>
                       <TableCell className="text-sm max-w-[150px] truncate">{doc.sender || '-'}</TableCell>
-                      <TableCell className="text-sm max-w-[150px] truncate">{doc.receiver || '-'}</TableCell>
-                      <TableCell className="text-sm max-w-[200px] truncate">{doc.subject || '-'}</TableCell>
+                      <TableCell className="text-sm max-w-[200px] truncate font-medium">{doc.subject || '-'}</TableCell>
+                      <TableCell className="text-sm text-center">
+                        <span className="text-xs bg-muted px-2 py-0.5 rounded border border-border">
+                            {doc.category || '-'}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         <span className={`text-xs px-2 py-1 rounded-full font-medium ${getDocTypeColor(doc.document_type)}`}>
                           {getDocTypeLabel(doc.document_type)}
@@ -229,8 +290,13 @@ export default function DocumentArchivePage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => navigate(`/documents/${doc.id}`)}>
-                            <Eye className="w-4 h-4" />
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            className="h-7 w-7 p-0" 
+                            onClick={() => setSelectedDocId(doc.id)}
+                          >
+                            <Eye className="w-4 h-4 text-primary" />
                           </Button>
                           {employee?.role === 'administrator' && (
                             <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:text-destructive" onClick={() => setDeleteTarget({ id: doc.id, name: doc.file_name })}>
@@ -264,11 +330,17 @@ export default function DocumentArchivePage() {
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Hapus Dokumen"
-        description={`Apakah Anda yakin ingin menghapus "${deleteTarget?.name}"? Tindakan ini tidak dapat dibatalkan.`}
+        title={deleteTarget?.ids ? "Hapus Banyak Dokumen" : "Hapus Dokumen"}
+        description={`Apakah Anda yakin ingin menghapus ${deleteTarget?.name}? Tindakan ini tidak dapat dibatalkan.`}
         confirmLabel="Hapus"
         variant="destructive"
         onConfirm={handleDelete}
+      />
+
+      <DocumentDetailModal 
+        documentId={selectedDocId} 
+        isOpen={!!selectedDocId} 
+        onClose={() => setSelectedDocId(null)} 
       />
     </div>
   );

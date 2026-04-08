@@ -103,11 +103,21 @@ export default function AdminPanelPage() {
     }
     setAddingUser(true);
     try {
+      // 1. Ambil session untuk otorisasi Edge Function
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Sesi Anda telah berakhir, silakan login ulang.');
+
+      // 2. Kirim request beserta token Bearer
       const { data, error } = await supabase.functions.invoke('create-user', {
         body: { email: newUser.email, password: newUser.password, name: newUser.name, nip: newUser.nip, role: newUser.role },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
       });
+      
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
+      
       toast.success(`Pengguna ${newUser.name} berhasil ditambahkan`);
       setNewUser({ name: '', nip: '', email: '', password: '123456', role: 'viewer', position: '' });
       setShowAddUser(false);
@@ -130,11 +140,21 @@ export default function AdminPanelPage() {
     }
     setChangingPassword(true);
     try {
+      // 1. Ambil session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Sesi Anda telah berakhir, silakan login ulang.');
+
+      // 2. Kirim request beserta token Bearer
       const { data, error } = await supabase.functions.invoke('create-user', {
         body: { action: 'change_password', user_id: passwordTarget.id, new_password: newPassword },
+        headers: {
+          Authorization: `Bearer ${session.access_token}`
+        }
       });
+
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
+      
       toast.success(`Password ${passwordTarget.name} berhasil diubah`);
       setShowPasswordDialog(false);
       setNewPassword('');

@@ -1,119 +1,231 @@
-import { useParams, useNavigate } from 'react-router-dom';
-import { useDocumentById, useDeleteDocument } from '@/hooks/useDocuments';
-import { useAuth } from '@/hooks/useAuth';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { DOCUMENT_TYPE_LABELS } from '@/types/document';
-import type { DocumentType } from '@/types/document';
-import { ArrowLeft, Download, Trash2, ExternalLink } from 'lucide-react';
-import { toast } from 'sonner';
 import { useState } from 'react';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useDocumentById, useUpdateDocument } from '@/hooks/useDocuments';
+import { DOCUMENT_TYPE_LABELS, type DocumentType } from '@/types/document';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { DocTypeSelect } from '@/components/DocTypeSelect';
+import { DocCategorySelect } from '@/components/DocCategorySelect';
+import { toast } from 'sonner';
+import { ArrowLeft, Calendar, FileText, User, Tag, Edit2, ExternalLink, Save, X, Loader2 } from 'lucide-react';
 
 export default function DocumentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { employee } = useAuth();
-  const { data: doc, isLoading } = useDocumentById(id || '');
-  const deleteDoc = useDeleteDocument();
-  const [showDelete, setShowDelete] = useState(false);
+  const { data: doc, isLoading } = useDocumentById(id!);
+  const updateDocument = useUpdateDocument();
 
-  if (isLoading) {
-    return <div className="flex items-center justify-center h-64 text-muted-foreground">Memuat...</div>;
-  }
+  // Mode halaman: 'view' untuk melihat PDF, 'edit' untuk form perubahan data
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [editForm, setEditForm] = useState<any>({});
+  const [saving, setSaving] = useState(false);
 
-  if (!doc) {
-    return <div className="flex items-center justify-center h-64 text-muted-foreground">Dokumen tidak ditemukan</div>;
-  }
+  const openEditMode = () => {
+    if (!doc) return;
+    setEditForm({
+      letter_number: doc.letter_number,
+      subject: doc.subject,
+      sender: doc.sender,
+      receiver: doc.receiver,
+      classification: doc.classification,
+      document_type: doc.document_type,
+      category: doc.category || '',
+      letter_date: doc.letter_date || '',
+    });
+    setMode('edit');
+  };
 
-  const handleDelete = async () => {
+  const handleSaveEdit = async () => {
+    setSaving(true);
     try {
-      await deleteDoc.mutateAsync(doc.id);
-      toast.success('Dokumen berhasil dihapus');
-      navigate('/archive');
+      await updateDocument.mutateAsync({
+        id: doc!.id,
+        ...editForm,
+      });
+      toast.success('Dokumen berhasil diperbarui');
+      setMode('view');
     } catch {
-      toast.error('Gagal menghapus dokumen');
+      toast.error('Gagal memperbarui dokumen');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const fields = [
-    { label: 'Nomor Surat', value: doc.letter_number },
-    { label: 'Tanggal Surat', value: doc.letter_date },
-    { label: 'Pengirim', value: doc.sender },
-    { label: 'Penerima', value: doc.receiver },
-    { label: 'Perihal', value: doc.subject },
-    { label: 'Klasifikasi', value: doc.classification },
-    { label: 'Jenis', value: DOCUMENT_TYPE_LABELS[doc.document_type as DocumentType] || doc.document_type },
-    { label: 'Tanggal Upload', value: new Date(doc.created_at).toLocaleDateString('id-ID') },
-  ];
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-20 text-muted-foreground animate-pulse">
+        <Loader2 className="w-10 h-10 animate-spin mb-4 text-primary" />
+        <p>Memuat detail dokumen...</p>
+      </div>
+    );
+  }
 
-  const isPdf = doc.file_name?.endsWith('.pdf') || doc.file_url?.endsWith('.pdf');
+  if (!doc) {
+    return (
+      <div className="p-8 text-center text-destructive">
+        <p>Dokumen tidak ditemukan.</p>
+        <Button variant="outline" className="mt-4" onClick={() => navigate(-1)}>Kembali</Button>
+      </div>
+    );
+  }
+
+  // Logika Live View
+  const fileExtension = doc.file_name.split('.').pop()?.toLowerCase();
+  const isPdf = fileExtension === 'pdf';
+  const viewerUrl = isPdf 
+    ? doc.file_url 
+    : `https://docs.google.com/viewer?url=${encodeURIComponent(doc.file_url)}&embedded=true`;
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/archive')}>
-          <ArrowLeft className="w-4 h-4 mr-1" /> Kembali
-        </Button>
-        <h1 className="text-2xl font-bold text-foreground">Detail Dokumen</h1>
-      </div>
+    <div className="space-y-6 animate-fade-in max-w-6xl mx-auto pb-8">
+      <Button variant="ghost" onClick={() => navigate(-1)} className="gap-2 -ml-4 hover:bg-transparent">
+        <ArrowLeft className="w-4 h-4" /> Kembali ke Arsip
+      </Button>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="border-border">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg">Metadata</CardTitle>
-            <div className="flex gap-2">
-              <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
-                <Button variant="outline" size="sm"><Download className="w-4 h-4 mr-1" /> Unduh</Button>
-              </a>
-              {employee?.role === 'administrator' && (
-                <Button variant="destructive" size="sm" onClick={() => setShowDelete(true)}>
-                  <Trash2 className="w-4 h-4 mr-1" /> Hapus
+      <Card className="border-border shadow-sm relative overflow-hidden">
+        {/* Dekorasi Latar Belakang */}
+        <div className="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
+          <FileText className="w-64 h-64" />
+        </div>
+        
+        {/* HEADER CARD */}
+        <CardHeader className="pb-4 border-b bg-muted/10">
+          <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
+            <div>
+              <div className="flex flex-wrap gap-2 mb-3">
+                <Badge className="bg-primary/90">{DOCUMENT_TYPE_LABELS[doc.document_type as DocumentType]}</Badge>
+                {doc.category && <Badge variant="outline" className="bg-background">{doc.category}</Badge>}
+                <Badge variant="secondary">{doc.classification}</Badge>
+              </div>
+              <CardTitle className="text-2xl leading-tight text-foreground pr-8">
+                {doc.subject || 'Tanpa Perihal'}
+              </CardTitle>
+            </div>
+            
+            {/* Tombol Aksi Kanan Atas */}
+            <div className="shrink-0 flex items-center gap-2">
+              {mode === 'view' ? (
+                <Button variant="outline" className="gap-2 bg-background shadow-sm" onClick={openEditMode}>
+                  <Edit2 className="w-4 h-4" /> Edit Metadata
                 </Button>
+              ) : (
+                <>
+                  <Button variant="ghost" onClick={() => setMode('view')}>
+                    <X className="w-4 h-4 mr-2" /> Batal
+                  </Button>
+                  <Button onClick={handleSaveEdit} disabled={saving} className="gap-2 shadow-sm">
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Simpan Perubahan
+                  </Button>
+                </>
               )}
             </div>
-          </CardHeader>
-          <CardContent>
-            <dl className="space-y-3">
-              {fields.map(({ label, value }) => (
-                <div key={label} className="flex flex-col sm:flex-row sm:gap-4 py-2 border-b border-border last:border-0">
-                  <dt className="text-sm font-medium text-muted-foreground w-32 shrink-0">{label}</dt>
-                  <dd className="text-sm text-foreground">{value || '-'}</dd>
+          </div>
+        </CardHeader>
+
+        {/* KONTEN UTAMA */}
+        <CardContent className="p-0">
+          {mode === 'edit' ? (
+            /* --- MODE EDIT (FORM) --- */
+            <div className="p-6 md:p-8 max-w-4xl mx-auto bg-background min-h-[500px]">
+              <h3 className="font-semibold text-lg border-b pb-3 mb-6">Ubah Informasi Dokumen</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-1 md:col-span-2">
+                  <Label>Perihal</Label>
+                  <Input value={editForm.subject} onChange={e => setEditForm({ ...editForm, subject: e.target.value })} />
                 </div>
-              ))}
-            </dl>
-          </CardContent>
-        </Card>
-
-        <Card className="border-border">
-          <CardHeader>
-            <CardTitle className="text-lg">Pratinjau Dokumen</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isPdf ? (
-              <iframe src={doc.file_url} className="w-full h-[500px] rounded-lg border border-border" title="Document preview" />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-                <ExternalLink className="w-8 h-8 mb-2" />
-                <p className="text-sm">Pratinjau tidak tersedia untuk format ini</p>
-                <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
-                  <Button variant="outline" size="sm" className="mt-2">Buka File</Button>
-                </a>
+                <div className="space-y-1">
+                  <Label>Nomor Surat</Label>
+                  <Input value={editForm.letter_number} onChange={e => setEditForm({ ...editForm, letter_number: e.target.value })} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Tanggal Surat</Label>
+                  <Input type="date" value={editForm.letter_date} onChange={e => setEditForm({ ...editForm, letter_date: e.target.value })} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Pengirim</Label>
+                  <Input value={editForm.sender} onChange={e => setEditForm({ ...editForm, sender: e.target.value })} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Penerima</Label>
+                  <Input value={editForm.receiver} onChange={e => setEditForm({ ...editForm, receiver: e.target.value })} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Jenis Surat</Label>
+                  <DocTypeSelect value={editForm.document_type} onValueChange={v => setEditForm({ ...editForm, document_type: v })} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Kategori / Unit</Label>
+                  <DocCategorySelect value={editForm.category} onValueChange={v => setEditForm({ ...editForm, category: v })} />
+                </div>
+                <div className="space-y-1 md:col-span-2">
+                  <Label>Klasifikasi (Sifat Surat)</Label>
+                  <Input value={editForm.classification} onChange={e => setEditForm({ ...editForm, classification: e.target.value })} />
+                </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+            </div>
+          ) : (
+            /* --- MODE VIEW (METADATA + LIVE IFRAME) --- */
+            <div className="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x border-border min-h-[700px]">
+              
+              {/* Kolom Kiri: Metadata */}
+              <div className="p-6 space-y-6 bg-muted/5">
+                <h3 className="font-semibold text-foreground border-b pb-2">Informasi Dokumen</h3>
+                <div className="space-y-5">
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1 flex items-center gap-2"><Tag className="w-4 h-4"/> Nomor Surat</p>
+                    <p className="font-medium">{doc.letter_number || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1 flex items-center gap-2"><Calendar className="w-4 h-4"/> Tanggal Surat</p>
+                    <p className="font-medium">{doc.letter_date || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1 flex items-center gap-2"><User className="w-4 h-4"/> Pengirim</p>
+                    <p className="font-medium leading-snug">{doc.sender || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1 flex items-center gap-2"><User className="w-4 h-4"/> Penerima</p>
+                    <p className="font-medium leading-snug">{doc.receiver || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1 flex items-center gap-2"><FileText className="w-4 h-4"/> Nama File Asli</p>
+                    <p className="font-medium text-sm break-all">{doc.file_name}</p>
+                  </div>
+                </div>
+              </div>
 
-      <ConfirmDialog
-        open={showDelete}
-        onOpenChange={setShowDelete}
-        title="Hapus Dokumen"
-        description={`Apakah Anda yakin ingin menghapus "${doc.file_name}"? Tindakan ini tidak dapat dibatalkan.`}
-        confirmLabel="Hapus"
-        variant="destructive"
-        onConfirm={handleDelete}
-      />
+              {/* Kolom Kanan: Live View */}
+              <div className="lg:col-span-2 p-6 flex flex-col bg-muted/10">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-semibold text-foreground">Pratinjau Dokumen</h3>
+                  <Button variant="secondary" size="sm" className="gap-2 text-xs bg-background hover:bg-muted shadow-sm border" onClick={() => window.open(doc.file_url, '_blank')}>
+                    Buka Tab Baru <ExternalLink className="w-3 h-3" />
+                  </Button>
+                </div>
+                
+                {/* Wadah Iframe */}
+                <div className="flex-1 w-full bg-background rounded-xl border border-border overflow-hidden relative shadow-inner min-h-[600px]">
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground -z-10">
+                    <Loader2 className="w-8 h-8 mb-4 opacity-50 animate-spin text-primary" />
+                    <p className="text-sm">Menghubungkan pratinjau...</p>
+                  </div>
+                  <iframe
+                    src={viewerUrl}
+                    className="absolute inset-0 w-full h-full border-0 bg-transparent"
+                    title="Document Live View"
+                    allowFullScreen
+                  />
+                </div>
+              </div>
+
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

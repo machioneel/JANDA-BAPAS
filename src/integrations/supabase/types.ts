@@ -19,6 +19,7 @@ export type Database = {
           classification: string
           created_at: string
           document_type: string
+          category: string | null
           file_name: string
           file_url: string
           id: string
@@ -33,6 +34,7 @@ export type Database = {
           classification?: string
           created_at?: string
           document_type: string
+          category: string | null
           file_name?: string
           file_url: string
           id?: string
@@ -47,6 +49,7 @@ export type Database = {
           classification?: string
           created_at?: string
           document_type?: string
+          category: string | null
           file_name?: string
           file_url?: string
           id?: string

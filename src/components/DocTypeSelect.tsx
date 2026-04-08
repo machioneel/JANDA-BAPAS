@@ -1,21 +1,29 @@
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DOCUMENT_TYPE_LABELS, type DocumentType } from '@/types/document';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DOCUMENT_TYPE_LABELS, type DocumentType } from "@/types/document";
 
 interface DocTypeSelectProps {
-  value: DocumentType | string;
-  onValueChange: (v: DocumentType) => void;
-  includeAll?: boolean;
-  className?: string;
+  // Kita izinkan value berupa DocumentType, 'all', atau string kosong
+  value: DocumentType | 'all' | ''; 
+  onValueChange: (value: any) => void;
+  includeAll?: boolean; // Daftarkan properti ini agar bisa digunakan
 }
 
-export function DocTypeSelect({ value, onValueChange, includeAll = false, className }: DocTypeSelectProps) {
+export function DocTypeSelect({ value, onValueChange, includeAll }: DocTypeSelectProps) {
   return (
-    <Select value={value || (includeAll ? 'all' : '')} onValueChange={(v) => onValueChange(v as DocumentType)}>
-      <SelectTrigger className={className}><SelectValue placeholder="Pilih jenis" /></SelectTrigger>
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger>
+        <SelectValue placeholder="Pilih Jenis Surat..." />
+      </SelectTrigger>
       <SelectContent>
-        {includeAll && <SelectItem value="all">Semua Jenis</SelectItem>}
+        {/* Tambahkan opsi 'all' jika properti includeAll dikirim */}
+        {includeAll && (
+          <SelectItem value="all">Semua Jenis Surat</SelectItem>
+        )}
+        
         {Object.entries(DOCUMENT_TYPE_LABELS).map(([key, label]) => (
-          <SelectItem key={key} value={key}>{label}</SelectItem>
+          <SelectItem key={key} value={key}>
+            {label}
+          </SelectItem>
         ))}
       </SelectContent>
     </Select>

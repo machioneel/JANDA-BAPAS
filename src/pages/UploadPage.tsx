@@ -5,15 +5,17 @@ import { supabase } from '@/integrations/supabase/client';
 import { extractMetadata } from '@/services/documentParser/extractMetadata';
 import { parseDocx } from '@/services/documentParser/parseDocx';
 import { parsePdf } from '@/services/documentParser/parsePdf';
-import type { ExtractedMetadata, DocumentType } from '@/types/document';
+import type { ExtractedMetadata, DocumentType, DocumentCategory } from '@/types/document';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { DocTypeSelect } from '@/components/DocTypeSelect';
+import { DocCategorySelect } from '@/components/DocCategorySelect'; // Komponen Baru
 import { toast } from 'sonner';
 import MetadataForm, { type MetadataFormValues } from '@/components/upload/MetadataForm';
 import MultiUploadPanel from '@/components/upload/MultiUploadPanel';
 import { Upload, FileText, X, Loader2, CheckCircle, Files } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 
 const emptyForm: MetadataFormValues = {
   letter_number: '', letter_date: '', sender: '', receiver: '', subject: '', classification: '',
@@ -22,7 +24,7 @@ const emptyForm: MetadataFormValues = {
 type SingleStatus = 'idle' | 'extracting' | 'ready' | 'uploading' | 'done' | 'error';
 
 export default function UploadPage() {
-  const { user } = useAuth();
+  const { user, employee } = useAuth(); // Pastikan mengambil 'employee' untuk uploader_name
   const createDocument = useCreateDocument();
 
   const [mode, setMode] = useState<'single' | 'multi'>('single');
@@ -30,7 +32,10 @@ export default function UploadPage() {
   const [singleStatus, setSingleStatus] = useState<SingleStatus>('idle');
   const [singleExtracted, setSingleExtracted] = useState<ExtractedMetadata | null>(null);
   const [singleForm, setSingleForm] = useState<MetadataFormValues>(emptyForm);
+  
   const [docType, setDocType] = useState<DocumentType>('incoming');
+  const [docCategory, setDocCategory] = useState<DocumentCategory | ''>('');
+  const [showConfirm, setShowConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const handleSingleFile = useCallback(async (file: File) => {
@@ -81,6 +86,8 @@ export default function UploadPage() {
 
   const handleSingleSubmit = async () => {
     if (!user || !singleFile || singleStatus !== 'ready') return;
+    if (!docCategory) { toast.error('Harap pilih kategori surat'); return; }
+
     setSaving(true);
     setSingleStatus('uploading');
     try {
@@ -89,8 +96,10 @@ export default function UploadPage() {
       if (uploadError) throw uploadError;
       const { data: urlData } = supabase.storage.from('bapas-documents').getPublicUrl(fileName);
 
+      // Menambahkan uploader_name dan uploader_id ke dalam payload mutasi
       await createDocument.mutateAsync({
         document_type: docType,
+        category: docCategory,
         letter_number: singleForm.letter_number,
         letter_date: singleForm.letter_date || null,
         sender: singleForm.sender,
@@ -100,7 +109,10 @@ export default function UploadPage() {
         file_url: urlData.publicUrl,
         file_name: singleFile.name,
         uploaded_by: user.id,
+        uploader_id: employee?.id || user.id, // Menambahkan uploader_id
+        uploader_name: employee?.name || 'Unknown', // Menambahkan uploader_name
       });
+      
       setSingleStatus('done');
       toast.success('Dokumen berhasil disimpan');
     } catch (err: any) {
@@ -182,9 +194,15 @@ export default function UploadPage() {
                 </div>
               )}
 
-              <div>
-                <Label>Jenis Surat</Label>
-                <DocTypeSelect value={docType} onValueChange={setDocType} />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label>Jenis Surat</Label>
+                  <DocTypeSelect value={docType} onValueChange={setDocType} />
+                </div>
+                <div>
+                  <Label>Kategori / Unit</Label>
+                  <DocCategorySelect value={docCategory} onValueChange={setDocCategory} />
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -200,9 +218,26 @@ export default function UploadPage() {
                 <>
                   <MetadataForm form={singleForm} metadata={singleExtracted} onChange={setSingleForm} />
                   <div className="mt-6">
-                    <Button className="w-full" disabled={singleStatus !== 'ready' || saving} onClick={handleSingleSubmit}>
+                    <Button 
+                      className="w-full" 
+                      disabled={singleStatus !== 'ready' || saving} 
+                      onClick={() => setShowConfirm(true)} 
+                    >
                       {saving ? 'Mengunggah...' : 'Simpan Dokumen'}
                     </Button>
+
+                    <ConfirmDialog
+                      open={showConfirm}
+                      onOpenChange={setShowConfirm}
+                      title="Simpan Dokumen?"
+                      description={`Apakah Anda yakin ingin menyimpan dokumen "${singleFile.name}" ke dalam sistem?`}
+                      confirmLabel="Ya, Simpan"
+                      onConfirm={() => {
+                        setShowConfirm(false); 
+                        handleSingleSubmit();  
+                      }}
+                    />
+                    
                     {singleStatus === 'done' && (
                       <p className="text-xs text-accent text-center mt-2">Dokumen telah disimpan ✓</p>
                     )}
@@ -218,7 +253,7 @@ export default function UploadPage() {
           </Card>
         </div>
       ) : (
-        <MultiUploadPanel docType={docType} onDocTypeChange={setDocType} />
+        <MultiUploadPanel/>
       )}
     </div>
   );

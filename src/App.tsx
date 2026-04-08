@@ -13,11 +13,17 @@ import DocumentArchivePage from "@/pages/DocumentArchivePage";
 import DocumentDetailPage from "@/pages/DocumentDetailPage";
 import AdminPanelPage from "@/pages/AdminPanelPage";
 import NotFound from "./pages/NotFound.tsx";
+import AboutPage from "./pages/About.tsx";
+import { useAutoLogout } from '@/hooks/useAutoLogout';
 
 const queryClient = new QueryClient();
 
 function ProtectedRoutes() {
   const { user, employee, loading } = useAuth();
+  
+  // PANGGIL HOOK AUTO LOGOUT DI SINI
+  // Hook ini akan memantau aktivitas selama user berada di area yang terproteksi
+  useAutoLogout();
 
   if (loading) {
     return (
@@ -42,6 +48,7 @@ function ProtectedRoutes() {
           employee?.role === 'administrator' ? <AdminPanelPage /> : <Navigate to="/" />
         } />
         <Route path="*" element={<NotFound />} />
+        <Route path="/about" element={<AboutPage />} />
       </Routes>
     </AppLayout>
   );
