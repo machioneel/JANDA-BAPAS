@@ -1,3 +1,3 @@
-# Welcome to your Lovable project
+# Project Inovasi Bapas
 
-TODO: Document your project here
+DAH KELAR POKOKNYA MAH
