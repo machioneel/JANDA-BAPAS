@@ -194,16 +194,28 @@ export default function DocumentArchivePage() {
 
             {showFilters && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-4 rounded-xl bg-muted/30 border border-border">
+                
                 <div className="space-y-1">
-                  <Label className="text-xs">Jenis Surat</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Jenis Surat</Label>
+                    {type && <X className="w-3 h-3 cursor-pointer text-muted-foreground hover:text-destructive" onClick={() => { setType(''); setPage(1); }} />}
+                  </div>
                   <DocTypeSelect value={type as DocumentType} onValueChange={(v) => { setType(v as DocumentType); setPage(1); }} />
                 </div>
+
                 <div className="space-y-1">
-                  <Label className="text-xs">Kategori / Unit</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Kategori / Unit</Label>
+                    {category && <X className="w-3 h-3 cursor-pointer text-muted-foreground hover:text-destructive" onClick={() => { setCategory(''); setPage(1); }} />}
+                  </div>
                   <DocCategorySelect value={category} onValueChange={(v) => { setCategory(v as DocumentCategory); setPage(1); }} />
                 </div>
+
                 <div className="space-y-1">
-                  <Label className="text-xs">Tahun</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Tahun</Label>
+                    {year && <X className="w-3 h-3 cursor-pointer text-muted-foreground hover:text-destructive" onClick={() => { setYear(''); setPage(1); }} />}
+                  </div>
                   <Select value={year || 'all'} onValueChange={(v) => { setYear(v === 'all' ? '' : v); setPage(1); }}>
                     <SelectTrigger><SelectValue placeholder="Semua Tahun" /></SelectTrigger>
                     <SelectContent>
@@ -212,26 +224,43 @@ export default function DocumentArchivePage() {
                     </SelectContent>
                   </Select>
                 </div>
+
                 <div className="space-y-1">
-                  <Label className="text-xs">Pengirim</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Pengirim</Label>
+                    {sender && <X className="w-3 h-3 cursor-pointer text-muted-foreground hover:text-destructive" onClick={() => { setSender(''); setPage(1); }} />}
+                  </div>
                   <Input placeholder="Filter pengirim..." value={sender} onChange={e => { setSender(e.target.value); setPage(1); }} />
                 </div>
+
                 <div className="space-y-1">
-                  <Label className="text-xs">Penerima</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Penerima</Label>
+                    {receiver && <X className="w-3 h-3 cursor-pointer text-muted-foreground hover:text-destructive" onClick={() => { setReceiver(''); setPage(1); }} />}
+                  </div>
                   <Input placeholder="Filter penerima..." value={receiver} onChange={e => { setReceiver(e.target.value); setPage(1); }} />
                 </div>
+
                 <div className="space-y-1">
-                  <Label className="text-xs">Dari Tanggal</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Dari Tanggal</Label>
+                    {dateFrom && <X className="w-3 h-3 cursor-pointer text-muted-foreground hover:text-destructive" onClick={() => { setDateFrom(''); setPage(1); }} />}
+                  </div>
                   <Input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1); }} />
                 </div>
+
                 <div className="space-y-1 lg:col-span-1">
-                  <Label className="text-xs">Sampai Tanggal</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">Sampai Tanggal</Label>
+                    {dateTo && <X className="w-3 h-3 cursor-pointer text-muted-foreground hover:text-destructive" onClick={() => { setDateTo(''); setPage(1); }} />}
+                  </div>
                   <Input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(1); }} />
                 </div>
+
                 <div className="flex items-end lg:col-span-2 justify-end">
-                    <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1 text-muted-foreground">
-                      <X className="w-3 h-3" /> Hapus semua filter
-                    </Button>
+                  <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-1 text-muted-foreground hover:text-destructive">
+                    <X className="w-3 h-3" /> Hapus semua filter
+                  </Button>
                 </div>
               </div>
             )}
